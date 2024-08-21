@@ -2,35 +2,43 @@ import json
 from contextlib import contextmanager
 
 import flask
-from redis import Redis
+from redis import Redis, Sentinel
 
-from flask_session.redis import RedisSession
+from flask_session.defaults import Defaults
+from flask_session.redis import RedisSentinelSession
 
 
-class TestRedisSession:
+class TestRedisSentinelSession:
     """This requires package: redis"""
 
     @contextmanager
-    def setup_redis(self):
-        self.r = Redis()
+    def setup_sentinel(self):
+        self.sentinel = Sentinel(
+            [("127.0.0.1", 26379), ("127.0.0.1", 26380), ("127.0.0.1", 26381)],
+        )
+        self.master: Redis = self.sentinel.master_for(
+            Defaults.SESSION_REDIS_SENTINEL_MASTER_SET
+
+        )
         try:
-            self.r.flushall()
+            self.master.flushall()
             yield
         finally:
-            self.r.flushall()
-            self.r.close()
+            self.master.flushall()
+            self.master.close()
 
     def retrieve_stored_session(self, key):
-        return self.r.get(key)
+        return self.master.get(key)
 
-    def test_redis_default(self, app_utils):
-        with self.setup_redis():
+
+    def test_redis_ha_default(self, app_utils):
+        with self.setup_sentinel():
             app = app_utils.create_app(
-                {"SESSION_TYPE": "redis", "SESSION_REDIS": self.r}
+                {"SESSION_TYPE": "redissentinel", "SESSION_REDIS_SENTINEL": self.sentinel}
             )
 
             with app.test_request_context():
-                assert isinstance(flask.session, RedisSession)
+                assert isinstance(flask.session, RedisSentinelSession)
                 app_utils.test_session(app)
 
                 # Check if the session is stored in Redis

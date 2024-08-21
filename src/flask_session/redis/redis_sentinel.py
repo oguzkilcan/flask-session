@@ -1,11 +1,12 @@
+import warnings
 from typing import Optional
 
 from flask import Flask
 from redis import Sentinel
 
-from .redis import RedisSessionInterface
-from ..base import ServerSideSession
+from ..base import ServerSideSession, ServerSideSessionInterface
 from ..defaults import Defaults
+from .redis import RedisSessionInterface
 
 
 class RedisSentinelSession(ServerSideSession):
@@ -39,14 +40,23 @@ class RedisSentinelSessionInterface(RedisSessionInterface):
         serialization_format: str = Defaults.SESSION_SERIALIZATION_FORMAT,
     ):
         if client is None or not isinstance(client, Sentinel):
-            raise TypeError("No valid Sentinel instance provided.")
+            warnings.warn(
+                "No valid Sentinel instance provided, attempting to create a new instance on localhost with default settings.",
+                RuntimeWarning,
+                stacklevel=1,
+            )
+            client = Sentinel()
         self.sentinel = client
         self.master = master
-        self.client = client
+        self._client = None
         super().__init__(
-            app, key_prefix, use_signer, permanent, sid_length, serialization_format
+            app, self.client, key_prefix, use_signer, permanent, sid_length, serialization_format
         )
 
     @property
     def client(self):
-        return self.sentinel.master_for(self.master)
+        return self.sentinel.master_for(self.master) if self._client is None else self._client
+
+    @client.setter
+    def client(self, value):
+        self._client = value
